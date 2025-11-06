@@ -102,7 +102,6 @@ def plot_buyer_diagnostics(M: Dict, i: int, *, show_jbr: bool = True, num_points
     vals  = np.array([theta_i(i, float(z), M)       for z in Zs])
     mvals = np.array([theta_i_prime(i, float(z), M) for z in Zs])
 
-    # optional JBR target (dry run)
     Z_hat, w_hat = None, None
     if show_jbr:
         q_hat, p_hat, feasible, _ = joint_best_response_plan(i, M)
@@ -158,7 +157,6 @@ def plot_buyer_diagnostics(M: Dict, i: int, *, show_jbr: bool = True, num_points
     fig.suptitle(f"Buyer {i}: valuation & marginal diagnostics", y=0.95)
     fig.tight_layout()
     plt.show()
-
 
 def plot_connectivity(M: Dict, *, title: Optional[str] = None, show_labels: bool = True):
     adj = M["adj"]
@@ -231,7 +229,7 @@ def plot_seller_price_ladder(M, j):
     ax.set_xticks(xs)
     ax.set_xticklabels(labels)
     ax.set_ylabel("requested q_i^j")
-    ax.set_xlabel("buyers\n(quantity, price)")
+    ax.set_xlabel("buyers\n (quantity, price)")
     ax2 = ax.twinx()
     ax2.step([x - 0.5 for x in xs] + [xs[-1] + 0.5], np.cumsum([0.0] + heights), where='post', linewidth=1.25)
     ax2.set_ylabel("cumulative quantity")
@@ -359,7 +357,7 @@ def plot_shared_buyer_surface_split(M, i, sellers=(0,1), q_steps=60, a_steps=60)
 
 
 def plot_prices_vs_percent(P, E, V=None, T=None, labels=None,
-                          title="Marginal value vs % multi-auction buyers",
+                          title="Marginal Value vs % Multi-Auction Buyers",
                           config=None):
     fig, ax = plt.subplots(figsize=(7, 5))
     L, J = E.shape
@@ -368,7 +366,7 @@ def plot_prices_vs_percent(P, E, V=None, T=None, labels=None,
     x = 100.0 * P
 
     for j in range(J):
-        ax.plot(x, E[:, j], lw=2, label=f"{labels[j]} – E")
+        ax.plot(x, E[:, j], lw=2, label=f"{labels[j]} – E(p_i)")
         if V is not None:
             std = np.sqrt(np.maximum(V[:, j], 0.0))
             ax.fill_between(x, E[:, j]-std, E[:, j]+std, alpha=0.18)
@@ -376,7 +374,7 @@ def plot_prices_vs_percent(P, E, V=None, T=None, labels=None,
             ax.plot(x, T[:, j], linestyle=":", lw=2.0, label=f"{labels[j]} – p*")
 
     ax.set_xlabel("% of buyers bidding in multiple auctions")
-    ax.set_ylabel("Price")
+    ax.set_ylabel("Marginal Value/ Price")
     ax.set_title(title)
     ax.grid(True, linestyle=":", alpha=0.6)
     ax.legend(loc="best", fontsize=9)
@@ -424,4 +422,22 @@ def plot_utility_surface(M: Dict, i: int, j: int, q_steps: int = 50, p_steps: in
     ax.set_zlabel('u_i (PSP)')
     ax.set_title(f'Utility Surface (buyer {i}, seller {j})')
     plt.tight_layout(); plt.show()
+
+def plot_equilibrium_transition(P, p_star_avg, theta_prime_avg, z_star_avg=None, title=None):
+    fig, ax = plt.subplots(figsize=(6.5, 4))
+    if z_star_avg is not None:
+        ax.plot(P, z_star_avg, "o-", label="avg $z^*$ (per buyer)")
+    ax.plot(P, theta_prime_avg, "s-", label=r"avg $\theta_i'(z_i^*)$")
+    ax.plot(P, p_star_avg, "^-", label=r"avg $p^*$")
+
+    ax.set_xlabel("% shared buyers")
+    ax.set_ylabel("Value / Price / Quantity")
+    if title:
+        ax.set_title(title)
+    else:
+        ax.set_title("Equilibrium transition vs. market connectivity")
+    ax.grid(True, alpha=0.4)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
 

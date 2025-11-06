@@ -64,15 +64,15 @@ def run_sanity_ladder():
     plot_connectivity(M, title="Market connectivity", show_labels=True)
     plot_buyer_diagnostics(M, 0)
     plot_buyer_diagnostics(M, 1)
-    plot_buyer_diagnostics(M, 2)
-    plot_buyer_diagnostics(M, 3)
+    #plot_buyer_diagnostics(M, 2)
+    #plot_buyer_diagnostics(M, 3)
 
-    plot_shared_buyer_surface_z0z1(M, 0, sellers=(0,1))
-    plot_shared_buyer_surface_z0z1(M, 1, sellers=(0,1))
-    plot_shared_buyer_surface_z0z1(M, 2, sellers=(0,1))
-    plot_shared_buyer_surface_z0z1(M, 3, sellers=(0,1))
-    plot_seller_price_ladder(M, 0)
-    plot_seller_price_ladder(M, 1)
+    #plot_shared_buyer_surface_z0z1(M, 0, sellers=(0,1))
+    #plot_shared_buyer_surface_z0z1(M, 1, sellers=(0,1))
+    #plot_shared_buyer_surface_z0z1(M, 2, sellers=(0,1))
+    #plot_shared_buyer_surface_z0z1(M, 3, sellers=(0,1))
+    #plot_seller_price_ladder(M, 0)
+    #plot_seller_price_ladder(M, 1)
 
 
 def seed_bids(M, bids):
@@ -106,71 +106,6 @@ def run_demo():
     plot_buyer_diagnostics(M, 1)
     plot_buyer_diagnostics(M, 2)
 
-
-def run_experiment(I, J, percents, Q_max, epsilon, reserve, steps, base_seed, jitter):
-    # Fix primitives once
-    Q = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, float)
-    R = np.full(J, float(reserve)) if np.isscalar(reserve) else np.asarray(reserve, float)
-
-    M = make_market_multi(I, J, Q_max=Q, epsilon=epsilon, reserve=R,
-                          seed=base_seed, adj=np.ones((I, J), dtype=bool))
-
-    P = np.asarray(percents, float)
-    E = np.zeros((len(P), J)); V = np.zeros((len(P), J))
-    T = np.zeros((len(P), J))
-    history_buyers = pd.DataFrame(columns=['interval','Seller','Buyer','q_i','p_i','a_i','z_i','p_marg','v_i','u_i','c_i','diff'])
-    history_sellers = pd.DataFrame()
-
-    seed_bids  = base_seed + 17    # same bids across levels
-    seed_sched0 = base_seed + 313  # deterministic schedule per level
-
-    for li, pm in enumerate(P):
-        # new adjacency for this level (percent-specific but reproducible)
-        rng_adj = np.random.default_rng(base_seed + 1009*li)
-        adj = make_membership_adj(I, J, pm, rng=rng_adj)
-
-        # reuse the same market: swap adj + reset state/bids
-        reset_market_for_new_adj(M, adj, seed_bids=seed_bids,
-                                 seed_sched=seed_sched0 + li, jitter=0.0)
-
-        #M["instant_post"] = True            # apply updates on compute, no POST_BID
-        #M["deterministic_sched"] = True     # schedule computes at t0+i, no jitter
-
-        schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
-        #schedule_all_buyers(M, t0=0.0)
-
-        run(M, steps=2000, verbose=False)
-
-        df = make_ladder_report(M)
-
-        plot_connectivity(M, title="Market connectivity", show_labels=True)
-        metrics = compute_market_metrics(M)
-        rep = market_report_from(metrics)
-        rep["% shared buyers"] = pm
-        print_df(rep)
-        plot_shared_buyer_surface_z0z1(M, 6, sellers=(0,1))
-        plot_buyer_diagnostics(M, 6)
-        plot_seller_price_ladder(M, 0)
-        #schedule_all_buyers(M)
-
-        # 1) Global classification (one row per buyer)
-        df_bstat = classify_buyers(M)
-        n_zero_alloc_pos_bid = int(df_bstat["zero_alloc_pos_bid"].sum())
-        n_zero_bid_no_gain   = int(df_bstat["zero_bid_no_gain"].sum())
-        # 2) Per-seller loser counts
-        losers_per_seller = per_seller_outbid_losers(M)
-        rep["losers"] = losers_per_seller  # per seller
-        # Add global counts (same value on each seller row for convenience)
-        rep["zero_alloc_pos_bid_total"] = n_zero_alloc_pos_bid
-        rep["zero_bid_no_gain_total"]   = n_zero_bid_no_gain
-
-        # metrics & reports
-        E[li] = rep["E_j"].to_numpy()
-        V[li] = rep["V_j"].to_numpy()
-        T[li] = rep["p_star_j"].to_numpy()
-
-
-    return M, P, E, V, T, history_buyers, history_sellers
 
 def experiment1():
     I, J = 8, 2
@@ -220,6 +155,5 @@ def experiment1():
 if __name__ == "__main__":
     #run_demo()
     run_sanity_ladder()
-    experiment1()
 
 
