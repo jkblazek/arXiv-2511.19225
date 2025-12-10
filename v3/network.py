@@ -25,7 +25,6 @@ def pop(M: Dict):
 
 def schedule_all_buyers(M: Dict, t0: float = 0.0):
     det = M["deterministic_sched"]
-    perm = M["perm"]
     rng = M["rng"]
     for i in range(M["I"]):
         if det:

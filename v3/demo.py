@@ -131,26 +131,26 @@ def run_experiment(I, J, percents, Q_max, epsilon, reserve, steps, base_seed, ji
 
         # reuse the same market: swap adj + reset state/bids
         reset_market_for_new_adj(M, adj, seed_bids=seed_bids,
-                                 seed_sched=seed_sched0 + li, jitter=0.0)
+                                 seed_sched=seed_sched0, jitter=0.0)
 
         #M["instant_post"] = True            # apply updates on compute, no POST_BID
-        #M["deterministic_sched"] = True     # schedule computes at t0+i, no jitter
+        M["deterministic_sched"] = True     # schedule computes at t0+i, no jitter
 
-        schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
-        #schedule_all_buyers(M, t0=0.0)
+        #schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
+        schedule_all_buyers(M, t0=0.0)
 
         run(M, steps=2000, verbose=False)
 
         df = make_ladder_report(M)
 
-        plot_connectivity(M, title="Market connectivity", show_labels=True)
+        #plot_connectivity(M, title="Market connectivity", show_labels=True)
         metrics = compute_market_metrics(M)
         rep = market_report_from(metrics)
         rep["% shared buyers"] = pm
         print_df(rep)
-        plot_shared_buyer_surface_z0z1(M, 6, sellers=(0,1))
-        plot_buyer_diagnostics(M, 6)
-        plot_seller_price_ladder(M, 0)
+        #plot_shared_buyer_surface_z0z1(M, 6, sellers=(0,1))
+        #plot_buyer_diagnostics(M, 6)
+        #plot_seller_price_ladder(M, 0)
         #schedule_all_buyers(M)
 
         # 1) Global classification (one row per buyer)
@@ -174,10 +174,10 @@ def run_experiment(I, J, percents, Q_max, epsilon, reserve, steps, base_seed, ji
 
 def experiment1():
     I, J = 8, 2
-    percents = [x / 100.0 for x in range(0, 101, 20)]  # 0 → 100
+    percents = [x / 100.0 for x in range(0, 101, 5)]  # 0 → 100
     base_seed=20405008
     Q_max=[60.0, 40.0]
-    epsilon=2.5
+    epsilon=5.0
     jitter=0.0
 
     M, P, E, V, T, H_buyers, H_sellers = run_experiment(
@@ -187,7 +187,7 @@ def experiment1():
         Q_max=Q_max,
         epsilon=epsilon,
         reserve=[0.0, 0.0],
-        steps=1500,
+        steps=2000,
         base_seed=base_seed,
         jitter=jitter
     )
@@ -219,7 +219,7 @@ def experiment1():
 # -----------------
 if __name__ == "__main__":
     #run_demo()
-    run_sanity_ladder()
+    #run_sanity_ladder()
     experiment1()
 
 
