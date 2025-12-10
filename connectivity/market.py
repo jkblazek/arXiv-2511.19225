@@ -28,9 +28,10 @@ def make_market_multi(I: int,
     Bid arrays (I×J): bid_q, bid_p
     """
     rng = np.random.default_rng(seed)
-    b = rng.uniform(*budget_range, size=I)
-    qbar = rng.uniform(*q_range, size=I)
-    kappa = rng.uniform(*kappa_range, size=I)
+    b = rng_init.uniform(*budget_range, size=I)
+    qbar = rng_init.uniform(*q_range, size=I)
+    pbar = rng_init.uniform(*p_range, size=I)
+    kappa = pbar/qbar
 
     Q_max = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, dtype=float)
     assert Q_max.shape == (J,)
