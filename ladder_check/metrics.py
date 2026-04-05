@@ -132,7 +132,7 @@ def market_report_from(metrics: MarketMetrics) -> pd.DataFrame:
     return df
 
 
-def record_market_snapshot_from(metrics: MarketMetrics,
+def record_market_snapshot_from(M: Dict, metrics: MarketMetrics,
                                 interval: float,
                                 market_history: pd.DataFrame) -> pd.DataFrame:
     I, J = metrics.a_mat.shape
@@ -141,6 +141,7 @@ def record_market_snapshot_from(metrics: MarketMetrics,
         z_i    = float(metrics.buyer_alloc[i])
         v_i    = float(metrics.buyer_value[i])
         c_i    = float(metrics.buyer_cost[i])
+        u_i    = float(metrics.buyer_util[i])
         p_marg = float(metrics.buyer_marg[i])
         for j in np.where(metrics.adj[i])[0]:
             rows.append({

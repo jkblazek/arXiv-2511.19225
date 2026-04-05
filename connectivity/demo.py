@@ -33,99 +33,7 @@ def run_demo():
     plot_buyer_diagnostics(M, 1)
     plot_buyer_diagnostics(M, 2)
 
-
-def run_experiment_trials2(I, J, percents, Q_max, epsilon, reserve, steps, seed, jitter, trials=100):
-    # Fix primitives once
-    Q = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, float)
-    R = np.full(J, float(reserve)) if np.isscalar(reserve) else np.asarray(reserve, float)
-
-    P = np.asarray(percents, float)
-    E = np.zeros((len(P), J))
-    V = np.zeros((len(P), J))
-    T = np.zeros((len(P), J))
-    metrics_list = []
-
-    for li, pm in enumerate(P):
-        trial_E = np.zeros((trials, J))
-        trial_V = np.zeros((trials, J))
-        trial_T = np.zeros((trials, J))
-
-        for trial in range(trials):
-            # new market per trial for reproducibility
-            seed_base = seed + 10000 * li + 1000 * trial
-            M = make_market_multi(I, J, Q_max=Q, epsilon=epsilon, reserve=R,
-                                  seed=seed_base, adj=np.ones((I, J), dtype=bool))
-
-            rng_adj = np.random.default_rng(seed_base + 1009)
-            adj = make_membership_adj(I, J, pm, rng=rng_adj)
-
-            reset_market_for_new_adj(M, adj, seed_bids=seed_base + 17,
-                                     seed_sched=seed_base + 313, jitter=jitter)
-
-            schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
-            run(M, steps=steps, verbose=False)
-
-            metrics = compute_market_metrics(M)
-            rep = market_report_from(metrics)
-            metrics_list.append(metrics)
-
-            trial_E[trial] = rep["E_j"].to_numpy()
-            trial_V[trial] = rep["V_j"].to_numpy()
-            trial_T[trial] = rep["p_star_j"].to_numpy()
-
-        # Mean across trials
-        E[li] = trial_E.mean(axis=0)
-        V[li] = trial_V.mean(axis=0)
-        T[li] = trial_T.mean(axis=0)
-
-    return P, E, V, T
-
-def run_experiment_trials(I, J, percents, Q_max, epsilon, reserve, steps, seed, jitter, trials=100):
-    # Fix primitives once
-    Q = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, float)
-    R = np.full(J, float(reserve)) if np.isscalar(reserve) else np.asarray(reserve, float)
-
-    P = np.asarray(percents, float)
-    E = np.zeros((len(P), J))
-    V = np.zeros((len(P), J))
-    T = np.zeros((len(P), J))
-    metrics_list = []
-    M = make_market_multi(I, J, Q_max=Q, epsilon=epsilon, reserve=R,
-                              seed=seed, adj=np.ones((I, J), dtype=bool))
-  
-    for li, pm in enumerate(P):
-        trial_E = np.zeros((trials, J))
-        trial_V = np.zeros((trials, J))
-        trial_T = np.zeros((trials, J))
-        rng_adj = np.random.default_rng(seed + li)
-        adj = make_membership_adj(I, J, pm, rng=rng_adj)
-
-        for trial in range(trials):
-            reset_market_for_new_adj(M, adj, seed_bids=seed,
-                                 seed_sched=seed, jitter=jitter)
-        
-            M["instant_post"] = True   
-            #M["deterministic_sched"] = True    
-            #schedule_all_buyers(M, t0=0.0)
-            run(M, steps=steps, verbose=False)
-
-            metrics = compute_market_metrics(M)
-            rep = market_report_from(metrics)
-
-            trial_E[trial] = rep["E_j"].to_numpy()
-            trial_V[trial] = rep["V_j"].to_numpy()
-            trial_T[trial] = rep["p_star_j"].to_numpy()
-
-        metrics_list.append(metrics)
-
-        # Mean across trials
-        E[li] = trial_E.mean(axis=0)
-        V[li] = trial_V.mean(axis=0)
-        T[li] = trial_T.mean(axis=0)
-
-    return P, E, V, T, metrics_list
-
-def run_experiment(I, J, percents, Q_max, epsilon, reserve, steps, seed, jitter):
+def run_noise_experiment(I, J, percents, Q_max, epsilon, reserve, steps, seed, jitter):
     # Fix primitives once
     Q = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, float)
     R = np.full(J, float(reserve)) if np.isscalar(reserve) else np.asarray(reserve, float)
@@ -191,44 +99,87 @@ def run_experiment(I, J, percents, Q_max, epsilon, reserve, steps, seed, jitter)
 
     return M, P, E, V, T
 
-def experiment1(stats: bool = False):
-    I, J = 8, 2
-    seed=20405008
-    Q_max=[60.0, 40.0]
-    epsilon=2.5
 
-    if stats:
-        percents = [x / 100.0 for x in range(0, 101, 5)]  # 0 → 100
-        P, E, V, T, metrics_list = run_experiment_trials(
-            I=I,
-            J=J,
-            percents=percents,
-            Q_max=Q_max,
+def run_connectivity_experiment(I, J, percents, Q_max, epsilon, reserve,
+                          steps, seed, jitter, trials=100):
+    # Fix primitives once
+    Q = (np.full(J, float(Q_max)) if np.isscalar(Q_max)
+         else np.asarray(Q_max, float))
+    R = (np.full(J, float(reserve)) if np.isscalar(reserve)
+         else np.asarray(reserve, float))
+
+    P = np.asarray(percents, float)
+    nP = len(P)
+
+    E = np.zeros((nP, J))
+    V = np.zeros((nP, J))
+    T = np.zeros((nP, J))
+
+    for trial in range(trials):
+        # --- 1) draw ONE market (valuations) for this trial
+        seed_base = seed + 1000 * trial
+        M = make_market_multi(
+            I, J,
+            Q_max=Q,
             epsilon=epsilon,
-            reserve=[0.0, 0.0],
-            steps=2500,
-            seed=seed,
-            jitter=0.0
+            reserve=R,
+            seed=seed_base,
+            adj=np.ones((I, J), dtype=bool),
         )
-        # metrics_list must be aligned with P (same order, one per level)
-        p_star_avg, theta_prime_avg, z_star_avg = summarize_transition_from_arrays(P, T, metrics_list)
-        plot_equilibrium_transition(P, p_star_avg, theta_prime_avg, z_star_avg,
-                            title="With MarketMetrics (true θ′ and z*)")
-        plot_prices_vs_percent(P, E, V, T,
-                           labels=[f"Seller {j}" for j in range(J)])
-    else:
-        percents = [x / 100.0 for x in range(0, 101, 10)]  # 0 → 100
-        M, P, E, V, T = run_experiment(
-            I=I,
-            J=J,
-            percents=percents,
-            Q_max=Q_max,
-            epsilon=epsilon,
-            reserve=[0.0, 0.0],
-            steps=1500,
-            seed=seed,
-            jitter=0.0
-        )
+
+        # --- 2) sweep connectivity for THIS fixed population
+        for li, pm in enumerate(P):
+            rng_adj = np.random.default_rng(seed_base + 1009 + li)
+            adj = make_membership_adj_banded(I, J, pm)
+            #adj = make_membership_adj(I, J, pm, rng=rng_adj)
+
+            reset_market_for_new_adj(
+                M,
+                adj,
+                seed_bids=seed_base + 17 + 50 * li,
+                seed_sched=seed_base + 313 + 50 * li,
+                jitter=jitter,
+            )
+
+            schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
+            run(M, steps=steps, verbose=False)
+
+            metrics = compute_market_metrics(M)
+            rep = market_report_from(metrics)
+            rep["% shared buyers"] = pm
+            print_df(rep)
+
+            E[li] += rep["E_j"].to_numpy()
+            V[li] += rep["V_j"].to_numpy()
+            T[li] += rep["p_star_j"].to_numpy()
+            #print("Percentage ", pm, " done")
+
+    # average over trials
+    E /= trials
+    V /= trials
+    T /= trials
+    return P, E, V, T
+
+def experiment1():
+    I, J = 300, 3
+    seed=20405008
+    Q_max=[500,1000,2000]
+    epsilon=5.0
+    jitter=0
+
+    percents = [x / 100.0 for x in range(0, 101, 10)]  # 0 → 100
+    P, E, V, T = run_connectivity_experiment(
+        I=I,
+        J=J,
+        percents=percents,
+        Q_max=Q_max,
+        epsilon=epsilon,
+        reserve=[6,6,6],
+        steps=2500,
+        seed=seed,
+        jitter=jitter,
+        trials=3,
+    )
     seeds = record_seeds(
         base_seed=seed,
         I=I, J=J, percents=percents,
@@ -244,18 +195,19 @@ def experiment1(stats: bool = False):
 
     plot_prices_vs_percent(P, E, V, T,
                            labels=[f"Seller {j}" for j in range(J)],
-                           config={"epsilon": epsilon,
-                                    "seed": seed,
-                                    "Q_max": Q_max,
-                                    "I": I}
+                           config={#"epsilon": epsilon,
+                                    #"seed": seed,
+                                    #"Q_max": Q_max,
+                                    #"jitter": jitter,
+                                    #"I": I
+                                   }
                            )
-
 
 # -----------------
 # Demo (minimal)
 # -----------------
 if __name__ == "__main__":
     #run_demo()
-    experiment1(stats=True)
+    experiment1()
 
 

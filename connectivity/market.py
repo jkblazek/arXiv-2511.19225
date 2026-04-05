@@ -28,9 +28,9 @@ def make_market_multi(I: int,
     Bid arrays (I×J): bid_q, bid_p
     """
     rng = np.random.default_rng(seed)
-    b = rng_init.uniform(*budget_range, size=I)
-    qbar = rng_init.uniform(*q_range, size=I)
-    pbar = rng_init.uniform(*p_range, size=I)
+    b = rng.uniform(*budget_range, size=I)
+    qbar = rng.uniform(*q_range, size=I)
+    pbar = rng.uniform(*p_range, size=I)
     kappa = pbar/qbar
 
     Q_max = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, dtype=float)
@@ -121,7 +121,7 @@ def integral_P_i_j(i: int, j: int, a: float, M: Dict, N: int = 100) -> float:
     zs = np.linspace(0.0, a, N + 1)
     Ps = np.array([P_i_j(i, j, float(zk), M) for zk in zs])
     dz = a / N
-    return float(np.trapz(Ps, dx=dz))
+    return float(np.trapezoid(Ps, dx=dz))
 
 # ------------------------------
 # Current allocation/cost/utility for buyer i (snapshot based)
@@ -147,52 +147,81 @@ def u_i_current(i: int, M: Dict) -> float:
 # ------------------------------
 # Joint best response
 # ------------------------------
-
-
 def build_ladders(i: int, M: Dict) -> Dict:
     """
     Build per-seller price ladders of opponents for buyer i:
       - per_seller[j]: dict with fields
-          'p'    : opponents' posted prices at seller j (ascending, filtered by adjacency)
+          'p'    : opponents' posted prices at seller j (ascending)
           'q'    : aligned opponents' quantities
-          'pref' : prefix sums of q (pref[t] = sum_{<t} q_sorted)
-          'suf'  : suffix sums of q (suf[t]  = sum_{>=t} q_sorted)
-      - steps: sorted global union of {0} ∪ {opponent prices across all sellers} ∪ {w_max}
+          'pref' : prefix sums of q
+          'suf'  : suffix sums of q
+      - steps: sorted global union of {0} ∪ {opponent prices} ∪ {w_max}
       - w_max: θ'_i(0)
+    The reserve buyer (if reserve[j] > 0) is modeled as an opponent with
+    price reserve[j] and quantity Q_max[j], but is NOT a real buyer row and
+    is therefore excluded from metrics.
     """
     I, J = int(M["I"]), int(M["J"])
-    others = np.ones(I, dtype=bool); others[i] = False
+    others = np.ones(I, dtype=bool)
+    others[i] = False
     has_adj = M.get("adj") is not None
 
     per_seller = []
     all_steps = [0.0]
+
     for j in range(J):
         if has_adj:
             opp_ok = M["adj"][others, j]
         else:
             opp_ok = np.ones(I - 1, dtype=bool)
+
         pcol = np.asarray(M["bid_p"][others, j][opp_ok], dtype=float)
         qcol = np.asarray(M["bid_q"][others, j][opp_ok], dtype=float)
+
+        # --- Inject reserve buyer as a synthetic opponent, if configured ---
+        if "reserve" in M:
+            rj = float(M["reserve"][j])
+            if rj > 0.0 and M["Q_max"][j] > 0.0:
+                pcol = np.append(pcol, rj)
+                qcol = np.append(qcol, M["Q_max"][j])
+
         if pcol.size:
             idx = np.argsort(pcol, kind="mergesort")
             p_sorted = pcol[idx]
             q_sorted = qcol[idx]
             n = p_sorted.size
-            pref = np.empty(n + 1, dtype=float); pref[0] = 0.0
-            for t in range(n): pref[t + 1] = pref[t] + float(q_sorted[t])
-            suf  = np.empty(n + 1, dtype=float); suf[n] = 0.0
-            for t in range(n - 1, -1, -1): suf[t] = suf[t + 1] + float(q_sorted[t])
-            per_seller.append({"p": p_sorted, "q": q_sorted, "pref": pref, "suf": suf})
+
+            pref = np.empty(n + 1, dtype=float)
+            pref[0] = 0.0
+            for t in range(n):
+                pref[t + 1] = pref[t] + float(q_sorted[t])
+
+            suf = np.empty(n + 1, dtype=float)
+            suf[n] = 0.0
+            for t in range(n - 1, -1, -1):
+                suf[t] = suf[t + 1] + float(q_sorted[t])
+
+            per_seller.append(
+                {"p": p_sorted, "q": q_sorted, "pref": pref, "suf": suf}
+            )
             all_steps.extend(np.unique(p_sorted).tolist())
         else:
-            per_seller.append({"p": np.array([], float),
-                               "q": np.array([], float),
-                               "pref": np.array([0.0], float),
-                               "suf":  np.array([0.0], float)})
-    w_max = float(theta_i_prime(i, 0.0, M))
-    steps = np.unique(np.concatenate([np.asarray(all_steps, float), np.array([w_max], float)]))
-    return {"per_seller": per_seller, "steps": steps, "w_max": w_max}
+            per_seller.append(
+                {
+                    "p": np.array([], float),
+                    "q": np.array([], float),
+                    "pref": np.array([0.0], float),
+                    "suf": np.array([0.0], float),
+                }
+            )
 
+    w_max = float(theta_i_prime(i, 0.0, M))
+    steps = np.unique(
+        np.concatenate(
+            [np.asarray(all_steps, float), np.array([w_max], float)]
+        )
+    )
+    return {"per_seller": per_seller, "steps": steps, "w_max": w_max}
 
 def _avail_lt_price(i: int, j: int, y: float, M: Dict, ladders: Dict) -> float:
     L = ladders["per_seller"][j]
@@ -263,7 +292,19 @@ def avail_at_bprice_qjc(i: int, y: float, M: Dict, ladders: Dict) -> np.ndarray:
         caps[j] = rem * qi / denom if denom > 0.0 else 0.0
     return caps
 
-def sup_G_i_multi(i: int, M: Dict, ladders: Dict) -> Tuple[float, np.ndarray, float, Dict]:
+def sup_G_i_multi(i: int, M: Dict, ladders: Dict) -> float:
+    tol = M["tol"]
+    steps = ladders["steps"]
+    z_max = 0.0
+    for y in steps:
+        caps = avail_at_bprice(i, y, M, ladders)
+        Z = float(caps.sum())
+        if Z > z_max + tol:
+            z_max = Z
+    # also respect buyer's own qbar
+    return min(z_max, float(M["qbar"][i]))
+
+def sup_G_i_multi_old(i: int, M: Dict, ladders: Dict) -> Tuple[float, np.ndarray, float, Dict]:
     tol = M["tol"]
     steps = ladders["steps"]  # sorted breakpoints y_0 < y_1 < ...
     w_max = ladders["w_max"]
@@ -357,7 +398,7 @@ def apply_budget_policy(i, M: Dict, q_row, base_cost):
     def util(qv, c):
         return theta_i(i, np.sum(qv), M) - c
     feasible = (base_cost <= b + M["tol"])
-    return q_row, base_cost, util(q_row, base_cost), feasible
+    return q_row, base_cost, util(q_row, base_cost), True #feasible
 
 def compute_t_i_multi(i, M: Dict, w_star, caps, z_star, meta, ladders):
     y_ref = meta.get("y", w_star) if isinstance(meta, dict) else w_star
@@ -366,6 +407,53 @@ def compute_t_i_multi(i, M: Dict, w_star, caps, z_star, meta, ladders):
     base_cost = cost_row(i, q_row, M)
     q_row, cost_new, u_new, feasible = apply_budget_policy(i, M, q_row, base_cost)
     return q_row, p_row, cost_new, u_new, feasible
+
+def compute_vi_and_wi(i: int, M: Dict, z_max: float) -> Tuple[float, float]:
+    eps = float(M["epsilon"])
+    theta0_prime = theta_i_prime(i, 0.0, M)
+    if theta0_prime <= 0.0:
+        return 0.0, 0.0
+    dz = eps / theta0_prime
+    v_i = max(0.0, z_max - dz)
+    w_i = theta_i_prime(i, v_i, M)
+    return v_i, w_i
+
+def multi_auction_eps_best_reply(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
+    ladders = build_ladders(i, M)
+
+    # 1) approximate sup G_i
+    z_max = sup_G_i_multi(i, M, ladders)
+    if z_max <= M["tol"]:
+        # nothing feasible; bid zero
+        J = M["J"]
+        q_zero = np.zeros(J, float)
+        p_zero = np.zeros(J, float)
+        u0 = u_i_current(i, M)
+        return q_zero, p_zero, True, u0
+
+    # 2) ε-step in quantity
+    v_i, w_i = compute_vi_and_wi(i, M, z_max)
+    if v_i <= M["tol"]:
+        J = M["J"]
+        q_zero = np.zeros(J, float)
+        p_zero = np.zeros(J, float)
+        u0 = u_i_current(i, M)
+        return q_zero, p_zero, True, u0
+
+    # 3) caps at the chosen price
+    caps = avail_at_bprice(i, w_i, M, ladders)
+    Z_feas = float(caps.sum())
+    # actual quantity is limited by environment and qbar
+    z_star = min(v_i, Z_feas, float(M["qbar"][i]))
+
+    # 4) min-cost split over sellers, using your existing segments
+    y_ref = w_i
+    q_row = _min_cost_split(i, M, z_star, np.asarray(caps), ladders, y_ref)
+    p_row = np.full(M["J"], w_i, float)
+
+    base_cost = cost_row(i, q_row, M)
+    q_row, cost_new, u_new, feasible = apply_budget_policy(i, M, q_row, base_cost)
+    return q_row, p_row, feasible, u_new
 
 def joint_best_response_plan(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
     ladders = build_ladders(i, M)

@@ -107,25 +107,62 @@ def run_demo():
     plot_buyer_diagnostics(M, 2)
 
 
-def experiment1():
-    I, J = 8, 2
-    percents = [x / 100.0 for x in range(0, 101, 20)]  # 0 → 100
-    base_seed=20405008
-    Q_max=[60.0, 40.0]
-    epsilon=2.5
-    jitter=0.0
+def run_experiment_trials(I, J, percents, Q_max, epsilon, reserve,
+                          steps, seed, jitter, trials=100):
+    # Fix primitives once
+    Q = (np.full(J, float(Q_max)) if np.isscalar(Q_max)
+         else np.asarray(Q_max, float))
+    R = (np.full(J, float(reserve)) if np.isscalar(reserve)
+         else np.asarray(reserve, float))
 
-    M, P, E, V, T, H_buyers, H_sellers = run_experiment(
-        I=I,
-        J=J,
-        percents=percents,
-        Q_max=Q_max,
-        epsilon=epsilon,
-        reserve=[0.0, 0.0],
-        steps=1500,
-        base_seed=base_seed,
-        jitter=jitter
-    )
+    P = np.asarray(percents, float)
+    nP = len(P)
+
+    E = np.zeros((nP, J))
+    V = np.zeros((nP, J))
+    T = np.zeros((nP, J))
+
+    for trial in range(trials):
+        # --- 1) draw ONE market (valuations) for this trial
+        seed_base = seed + 1000 * trial
+        M = make_market_multi(
+            I, J,
+            Q_max=Q,
+            epsilon=epsilon,
+            reserve=R,
+            seed=seed_base,
+            adj=np.ones((I, J), dtype=bool),
+        )
+
+        # --- 2) sweep connectivity for THIS fixed population
+        for li, pm in enumerate(P):
+            rng_adj = np.random.default_rng(seed_base + 1009 + li)
+            adj = make_membership_adj_banded(I, J, pm)
+            #adj = make_membership_adj(I, J, pm, rng=rng_adj)
+
+            reset_market_for_new_adj(
+                M,
+                adj,
+                seed_bids=seed_base + 17 + 50 * li,
+                seed_sched=seed_base + 313 + 50 * li,
+                jitter=jitter,
+            )
+
+            schedule_all_buyers_stable(M, t0=0.0, seed_order=42)
+            run(M, steps=steps, verbose=False)
+
+            metrics = compute_market_metrics(M)
+            rep = market_report_from(metrics)
+
+            E[li] += rep["E_j"].to_numpy()
+            V[li] += rep["V_j"].to_numpy()
+            T[li] += rep["p_star_j"].to_numpy()
+            print("Percentage ", pm, " done")
+
+    # average over trials
+    E /= trials
+    V /= trials
+    T /= trials
     seeds = record_seeds(
         base_seed=base_seed,
         I=I, J=J, percents=percents,
@@ -148,12 +185,33 @@ def experiment1():
                                     "I": I}
                            )
 
+def experiment1():
+    I, J = 300, 3
+    seed=20405008
+    Q_max=[500,1000,2000]
+    epsilon=5.0
+    jitter=0
+
+    percents = [x / 100.0 for x in range(0, 101, 10)]  # 0 → 100
+    P, E, V, T = run_experiment_trials(
+        I=I,
+        J=J,
+        percents=percents,
+        Q_max=Q_max,
+        epsilon=epsilon,
+        reserve=[6,6,6],
+        steps=2500,
+        seed=seed,
+        jitter=jitter,
+        trials=25,
+    )
 
 # -----------------
 # Demo (minimal)
 # -----------------
 if __name__ == "__main__":
     #run_demo()
-    run_sanity_ladder()
+    #run_sanity_ladder()
+    experiment1()
 
 

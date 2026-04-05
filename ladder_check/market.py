@@ -13,10 +13,9 @@ def make_market_multi(I: int,
                       Q_max: float | np.ndarray = 100.0,
                       epsilon: float = 5.0,
                       reserve: float | np.ndarray = 0.0,
-                      budget_range=(1000.0, 1000.0),
-                      q_range=(10.0, 60.0),
+                      budget_range=(10.0, 20.0),
+                      q_range=(50.0, 100.0),
                       p_range=(10.0, 20.0),
-                      kappa_range=(1.0, 3.5),
                       seed: int = 12345,
                       jitter: float = 0.01,
                       price_tol: float = 5e-3,
@@ -30,7 +29,8 @@ def make_market_multi(I: int,
     rng = np.random.default_rng(seed)
     b = rng.uniform(*budget_range, size=I)
     qbar = rng.uniform(*q_range, size=I)
-    kappa = rng.uniform(*kappa_range, size=I)
+    pbar = rng.uniform(*p_range, size=I)
+    kappa = pbar/qbar
 
     Q_max = np.full(J, float(Q_max)) if np.isscalar(Q_max) else np.asarray(Q_max, dtype=float)
     assert Q_max.shape == (J,)
@@ -120,7 +120,7 @@ def integral_P_i_j(i: int, j: int, a: float, M: Dict, N: int = 100) -> float:
     zs = np.linspace(0.0, a, N + 1)
     Ps = np.array([P_i_j(i, j, float(zk), M) for zk in zs])
     dz = a / N
-    return float(np.trapz(Ps, dx=dz))
+    return float(np.trapezoid(Ps, dx=dz))
 
 # ------------------------------
 # Current allocation/cost/utility for buyer i (snapshot based)
@@ -146,51 +146,81 @@ def u_i_current(i: int, M: Dict) -> float:
 # ------------------------------
 # Joint best response
 # ------------------------------
-
 def build_ladders(i: int, M: Dict) -> Dict:
     """
     Build per-seller price ladders of opponents for buyer i:
       - per_seller[j]: dict with fields
-          'p'    : opponents' posted prices at seller j (ascending, filtered by adjacency)
+          'p'    : opponents' posted prices at seller j (ascending)
           'q'    : aligned opponents' quantities
-          'pref' : prefix sums of q (pref[t] = sum_{<t} q_sorted)
-          'suf'  : suffix sums of q (suf[t]  = sum_{>=t} q_sorted)
-      - steps: sorted global union of {0} ∪ {opponent prices across all sellers} ∪ {w_max}
+          'pref' : prefix sums of q
+          'suf'  : suffix sums of q
+      - steps: sorted global union of {0} ∪ {opponent prices} ∪ {w_max}
       - w_max: θ'_i(0)
+    The reserve buyer (if reserve[j] > 0) is modeled as an opponent with
+    price reserve[j] and quantity Q_max[j], but is NOT a real buyer row and
+    is therefore excluded from metrics.
     """
     I, J = int(M["I"]), int(M["J"])
-    others = np.ones(I, dtype=bool); others[i] = False
+    others = np.ones(I, dtype=bool)
+    others[i] = False
     has_adj = M.get("adj") is not None
 
     per_seller = []
     all_steps = [0.0]
+
     for j in range(J):
         if has_adj:
             opp_ok = M["adj"][others, j]
         else:
             opp_ok = np.ones(I - 1, dtype=bool)
+
         pcol = np.asarray(M["bid_p"][others, j][opp_ok], dtype=float)
         qcol = np.asarray(M["bid_q"][others, j][opp_ok], dtype=float)
+
+        # --- Inject reserve buyer as a synthetic opponent, if configured ---
+        if "reserve" in M:
+            rj = float(M["reserve"][j])
+            if rj > 0.0 and M["Q_max"][j] > 0.0:
+                pcol = np.append(pcol, rj)
+                qcol = np.append(qcol, M["Q_max"][j])
+
         if pcol.size:
             idx = np.argsort(pcol, kind="mergesort")
             p_sorted = pcol[idx]
             q_sorted = qcol[idx]
             n = p_sorted.size
-            pref = np.empty(n + 1, dtype=float); pref[0] = 0.0
-            for t in range(n): pref[t + 1] = pref[t] + float(q_sorted[t])
-            suf  = np.empty(n + 1, dtype=float); suf[n] = 0.0
-            for t in range(n - 1, -1, -1): suf[t] = suf[t + 1] + float(q_sorted[t])
-            per_seller.append({"p": p_sorted, "q": q_sorted, "pref": pref, "suf": suf})
+
+            pref = np.empty(n + 1, dtype=float)
+            pref[0] = 0.0
+            for t in range(n):
+                pref[t + 1] = pref[t] + float(q_sorted[t])
+
+            suf = np.empty(n + 1, dtype=float)
+            suf[n] = 0.0
+            for t in range(n - 1, -1, -1):
+                suf[t] = suf[t + 1] + float(q_sorted[t])
+
+            per_seller.append(
+                {"p": p_sorted, "q": q_sorted, "pref": pref, "suf": suf}
+            )
             all_steps.extend(np.unique(p_sorted).tolist())
         else:
-            per_seller.append({"p": np.array([], float),
-                               "q": np.array([], float),
-                               "pref": np.array([0.0], float),
-                               "suf":  np.array([0.0], float)})
-    w_max = float(theta_i_prime(i, 0.0, M))
-    steps = np.unique(np.concatenate([np.asarray(all_steps, float), np.array([w_max], float)]))
-    return {"per_seller": per_seller, "steps": steps, "w_max": w_max}
+            per_seller.append(
+                {
+                    "p": np.array([], float),
+                    "q": np.array([], float),
+                    "pref": np.array([0.0], float),
+                    "suf": np.array([0.0], float),
+                }
+            )
 
+    w_max = float(theta_i_prime(i, 0.0, M))
+    steps = np.unique(
+        np.concatenate(
+            [np.asarray(all_steps, float), np.array([w_max], float)]
+        )
+    )
+    return {"per_seller": per_seller, "steps": steps, "w_max": w_max}
 
 def _avail_lt_price(i: int, j: int, y: float, M: Dict, ladders: Dict) -> float:
     L = ladders["per_seller"][j]
@@ -302,11 +332,13 @@ def sup_G_i_multi(i: int, M: Dict, ladders: Dict) -> Tuple[float, np.ndarray, fl
     if C_low >= C_up:
       y_star = y_lower
       z_star = min(M["qbar"][i], Z_low)
+      caps_star = lower_caps
     else:
       y_star = y_upper
       z_star = min(M["qbar"][i], Z_up)
+      caps_star = upper_caps
 
-    return y_star, caps, z_star, {"type": "boundary", "y": y_star}
+    return y_star, caps_star, z_star, {"type": "boundary", "y": y_star}
 
 def _min_cost_split(i, M: Dict, z_star, caps, ladders, y_ref):
     J = M["J"]
@@ -364,6 +396,7 @@ def compute_t_i_multi(i, M: Dict, w_star, caps, z_star, meta, ladders):
     base_cost = cost_row(i, q_row, M)
     q_row, cost_new, u_new, feasible = apply_budget_policy(i, M, q_row, base_cost)
     return q_row, p_row, cost_new, u_new, feasible
+    #return q_row, p_row, cost_new, u_new, True
 
 def joint_best_response_plan(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
     ladders = build_ladders(i, M)

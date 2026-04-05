@@ -45,6 +45,28 @@ def make_membership_adj(I: int, J: int,
         adj[i, idx] = True
     return adj
 
+def make_membership_adj_banded(I: int, J: int, xp: float) -> np.ndarray:
+    adj = np.zeros((I, J), dtype=bool)
+    # Block size (disjoint case xp=0)
+    base = I / J
+    # Maximum possible half-width of expansion
+    # So at xp=1 the blocks reach across the entire domain.
+    extend = I
+    for j in range(J):
+        # Center of seller j's block
+        center = (j + 0.5) * base
+        # Half-width grows with xp (0 → base/2, 1 → full extension)
+        half_width = (base / 2) + xp * (extend / 2)
+        # Buyers whose index falls inside this window participate
+        left = int(np.floor(center - half_width))
+        right = int(np.ceil(center + half_width))
+        # Clip to buyer domain
+        left = max(left, 0)
+        right = min(right, I)
+        adj[left:right, j] = True
+    return adj
+
+
 def record_seeds(base_seed: int,
                  *,
                  I: int,
