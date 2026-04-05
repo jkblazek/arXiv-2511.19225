@@ -4,86 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-from market import theta_i_prime, theta_i, a_row, u_i_current, integral_P_i_j, joint_best_response_plan
-from helpers import eval_u_i_two_sellers, pstar_j
-from market import a_row, cost_row, u_i_current
+from market import theta_i_prime, theta_i, a_row, u_i_current, integral_P_i_j, joint_best_response_plan, cost_row
 from metrics import compute_market_metrics, MarketMetrics
-
-def plot_buyer_diagnostics_broken(M: Dict,
-                           i: int,
-                           *,
-                           num_points: int = 200):
-    # --- Current state for buyer i ---
-    J = M["J"]
-    metrics = compute_market_metrics(M)
-
-    p_bids = metrics.bid_p[i,:]
-    p_star = metrics.p_star_j
-    v_cur = metrics.buyer_value[i]
-    u_cur = metrics.buyer_util[i]
-    w_cur = metrics.buyer_marg[i]
-    z_cur = metrics.buyer_alloc[i]
-    cost_cur = metrics.buyer_cost[i]
-
-
-    # --- Curves θ_i(z) and θ'_i(z) ---
-    zmax = max(M["qbar"][i], M["tol"])
-    Z = np.linspace(0.0, zmax, num_points)
-    fig, (axV, axM) = plt.subplots(1, 2, figsize=(10, 4))
-
-    # --- Valuation plot ---
-    Theta = np.array([theta_i(i, z, M) for z in Z])
-    axV.plot(Z, Theta, label=r"$\theta_i(z)$")
-
-    axV.axvline(z_cur, linestyle="--", linewidth=0.8)
-    axV.scatter([z_cur], [v_cur], zorder=5, label="(z, θ(z))")
-    
-    
-    axV.set_xlabel("Total quantity z")
-    axV.set_ylabel(r"$\theta_i(z)$")
-    axV.set_title(f"Buyer {i}: valuation")
-    axV.legend(loc="best")
-    axV.set_xlim(0.0, zmax * 1.1 if zmax > 0 else 1.0)
-
-    # --- Marginal vs prices ---
-    MTheta = np.array([theta_i_prime(i, z, M) for z in Z])
-    axM.plot(Z, MTheta, label=r"$\theta'_i(z)$")
-    axM.axvline(z_cur, linestyle="--", linewidth=0.8)
-    axM.scatter([z_cur], [w_cur], zorder=5, label="(z, θ'(z))")
-
-    axM.plot([], [], linestyle="-", linewidth=0.8, alpha=0.5, label="p*(seller)")
-    axM.axhline(p_star[0], linestyle="-", linewidth=0.8, alpha=0.5)
-
-    axM.set_xlabel("Total quantity z")
-    axM.set_ylabel("Marginal Value / Price")
-    axM.set_title(f"Buyer {i}: marginal vs. bids and p*")
-    axM.legend(loc="best")
-
-    y_top = max(MTheta.max() if MTheta.size else 1.0,
-                np.max(p_bids) if J else 0.0,
-                np.max(p_star)) * 1.1
-    axM.set_xlim(0.0, zmax * 1.1 if zmax > 0 else 1.0)
-    axM.set_ylim(0.0, y_top if y_top > 0 else 1.0)
-    lines = [
-        f"z={z_cur:.3f}\n",
-        f"θ'(z)={w_cur:.3f}\n",
-        f"value={v_cur:.3f}, \ncost={cost_cur:.3f}, \nutil={u_cur:.3f}\n",
-    ]
-    lines.append(f"best-response z={z_cur:.3f}, w={w_cur:.3f}")
-
-    axM.text(0.98, 0.02,"".join(lines),
-            ha="right",
-            va="bottom",
-            transform=axM.transAxes,
-            fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.3", alpha=0.1),
-    )
-
-    fig.suptitle(f"Buyer {i}: Valuation and Marginal Prices", y=0.95)
-    fig.tight_layout()
-    plt.show()
-
-    plot_shared_buyer_surface_z0z1(M, 0)
 
 def plot_buyer_diagnostics(M: Dict, i: int, *, show_jbr: bool = True, num_points: int = 200):
     # snapshot

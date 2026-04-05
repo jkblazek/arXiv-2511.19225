@@ -120,7 +120,7 @@ def integral_P_i_j(i: int, j: int, a: float, M: Dict, N: int = 100) -> float:
     zs = np.linspace(0.0, a, N + 1)
     Ps = np.array([P_i_j(i, j, float(zk), M) for zk in zs])
     dz = a / N
-    return float(np.trapz(Ps, dx=dz))
+    return float(np.trapezoid(Ps, dx=dz))
 
 # ------------------------------
 # Current allocation/cost/utility for buyer i (snapshot based)

@@ -100,9 +100,9 @@ def reset_market_for_new_adj(M: Dict,
     M["bid_p"].fill(0.0)
     if seed_bids is not None:
         randomize_bids(M, seed=seed_bids)
-        #fair_bids(M)
     else:
-        print("Warning: Initial bids non-deterministic!")
+        import warnings
+        warnings.warn("reset_market_for_new_adj: seed_bids not set — initial bids are non-deterministic.", stacklevel=2)
     M["pq"].clear()
     M["seq"] = 0
     M["t"] = 0.0
@@ -112,5 +112,6 @@ def reset_market_for_new_adj(M: Dict,
     if seed_sched is not None:
         M["rng"] = np.random.default_rng(seed_sched)
     else:
-        print("Warning: Non-deterministic scheduling!")
+        import warnings
+        warnings.warn("reset_market_for_new_adj: seed_sched not set — scheduling is non-deterministic.", stacklevel=2)
     M["jitter"] = float(jitter)
