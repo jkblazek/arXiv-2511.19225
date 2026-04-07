@@ -4,25 +4,24 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 
-from helpers import *
+from psp.helpers import *
 
 @dataclass
 class LadderResult:
 
     _ladder_impossible: set = field(default_factory=set)
 
-def make_ladder_report(M: Dict) -> LadderResult:
-      _ladder_impossible = set()
-
-      df = check_all_price_ladders(M, lad=_ladder_impossible, t=M["t"])
-      if df.empty:
+def make_ladder_report(M: Dict):
+    lad = set()
+    df = check_all_price_ladders(M, lad=lad, t=M["t"])
+    if df.empty:
         print("No ladder tuples found.")
-      else:
+    else:
         with pd.option_context("display.max_rows", None, "display.width", 100):
-            print("\nLADDER TUPLES:")
+            print("LADDER TUPLES:")
             print(df.round(3).to_string(index=False))
-      print_final_ladder_report(M, df)
-      return df
+    print_final_ladder_report(M, df, t_now=M["t"])
+    return df
 
 def _ladder_precheck(M: Dict, j: int):
     if not M["seller_converged"][j]:
@@ -147,15 +146,31 @@ def check_all_price_ladders(M: Dict, lad: set(), t: int=0.0, hops: int=1):
 
 def _ladder_reason_empty(M: Dict):
     J = M["J"]
-    zeros = []
-    for j in range(J):
-        if pstar_j(M, j) == 0.0:
-            zeros.append(j)
+    zeros = [j for j in range(J) if pstar_j(M, j) == 0.0]
     if zeros:
         ids = ", ".join(str(x) for x in zeros)
         return f"No ladder: undersubscribed sellers with p* = 0 (sellers: {ids})."
-    return ("No ladder: graph has only trivial shells "
-            "(each seller shares ≤1 buyer, so (ℓ,k,j,i) cannot form).")
+
+    # Check for equal-clearing-price neighbors (common cause of empty ladders)
+    equal_pairs = []
+    for j in range(J):
+        pj = pstar_j(M, j)
+        shell = seller_shell_1hop(M, j)
+        for ell in shell:
+            if abs(pj - pstar_j(M, ell)) <= M["price_tol"]:
+                equal_pairs.append((ell, j))
+
+    if equal_pairs:
+        pairs_str = ", ".join(f"({ell},{j})" for ell, j in sorted(set(equal_pairs)))
+        return (
+            "No ladder: neighboring sellers have equal clearing prices "
+            f"(pairs: {pairs_str}); the ladder requires strict p*_ell < p*_j."
+        )
+
+    return (
+        "No ladder: graph has only trivial shells "
+        "(each seller shares ≤1 buyer, so (ℓ,k,j,i) cannot form)."
+    )
 
 def print_final_ladder_report(M: Dict, out: pd.DataFrame, t_now=0.0, hops=1):
     if out.empty:

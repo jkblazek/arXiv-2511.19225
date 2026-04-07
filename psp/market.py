@@ -13,9 +13,10 @@ def make_market_multi(I: int,
                       Q_max: float | np.ndarray = 100.0,
                       epsilon: float = 5.0,
                       reserve: float | np.ndarray = 0.0,
-                      budget_range=(10.0, 20.0),
-                      q_range=(50.0, 100.0),
+                      budget_range=(1000.0, 1000.0),
+                      q_range=(10.0, 60.0),
                       p_range=(10.0, 20.0),
+                      kappa_range=(1.0, 3.5),
                       seed: int = 12345,
                       jitter: float = 0.01,
                       price_tol: float = 5e-3,
@@ -120,7 +121,7 @@ def integral_P_i_j(i: int, j: int, a: float, M: Dict, N: int = 100) -> float:
     zs = np.linspace(0.0, a, N + 1)
     Ps = np.array([P_i_j(i, j, float(zk), M) for zk in zs])
     dz = a / N
-    return float(np.trapezoid(Ps, dx=dz))
+    return float(np.trapz(Ps, dx=dz))
 
 # ------------------------------
 # Current allocation/cost/utility for buyer i (snapshot based)
@@ -251,8 +252,16 @@ def _count_bids_with_equal_price(j: int, y: float, ladders: Dict) -> int:
     return r - l
 
 def avail_at_bprice(i: int, y: float, M: Dict, ladders: Dict) -> np.ndarray:
-    #return avail_at_bprice_qjc(i, y, M, ladders)
-    return avail_at_bprice_fair(i, y, M, ladders)
+    """Dispatch to the configured tie-splitting rule.
+
+    "qjc"  (default) — quantity-proportional split; preserves PSP/VCG
+                        incentive-compatibility and the externality calculation.
+    "fair"            — equal count-split; breaks VCG properties.
+                        See experiments/free_lunch.py for the intended use.
+    """
+    if M.get("tie_policy", "qjc") == "fair":
+        return avail_at_bprice_fair(i, y, M, ladders)
+    return avail_at_bprice_qjc(i, y, M, ladders)
 
 def avail_at_bprice_fair(i: int, y: float, M: Dict, ladders: Dict) -> np.ndarray:
     """
@@ -317,26 +326,24 @@ def sup_G_i_multi(i: int, M: Dict, ladders: Dict) -> Tuple[float, np.ndarray, fl
         if theta_i_prime(i, Zk, M) >= yk - tol:
             k_star = k
 
-    y_lower = steps[k_star] # left boundary of that interval
+    y_lower = steps[k_star]
     lower_caps = avail_at_bprice(i, y_lower, M, ladders)
-    Z_low = np.sum(caps)
-    C_low = y_lower*Z_low
-    #print("[boundary] Lower boundary cost: ", C_low)
+    Z_low = lower_caps.sum()
+    C_low = y_lower * Z_low
 
-    y_upper = steps[min(k_star + 1, len(steps) - 1)]  # right boundary of that interval
+    y_upper = steps[min(k_star + 1, len(steps) - 1)]
     upper_caps = avail_at_bprice(i, y_upper, M, ladders)
-    Z_up = np.sum(caps)
-    C_up = y_upper*Z_up
-    #print("[boundary] Upper boundary cost: ", C_up)
+    Z_up = upper_caps.sum()
+    C_up = y_upper * Z_up
 
     if C_low >= C_up:
-      y_star = y_lower
-      z_star = min(M["qbar"][i], Z_low)
-      caps_star = lower_caps
+        y_star = y_lower
+        z_star = min(M["qbar"][i], Z_low)
+        caps_star = lower_caps
     else:
-      y_star = y_upper
-      z_star = min(M["qbar"][i], Z_up)
-      caps_star = upper_caps
+        y_star = y_upper
+        z_star = min(M["qbar"][i], Z_up)
+        caps_star = upper_caps
 
     return y_star, caps_star, z_star, {"type": "boundary", "y": y_star}
 
@@ -387,7 +394,7 @@ def apply_budget_policy(i, M: Dict, q_row, base_cost):
     def util(qv, c):
         return theta_i(i, np.sum(qv), M) - c
     feasible = (base_cost <= b + M["tol"])
-    return q_row, base_cost, util(q_row, base_cost), feasible
+    return q_row, base_cost, util(q_row, base_cost), True #feasible
 
 def compute_t_i_multi(i, M: Dict, w_star, caps, z_star, meta, ladders):
     y_ref = meta.get("y", w_star) if isinstance(meta, dict) else w_star
@@ -396,14 +403,66 @@ def compute_t_i_multi(i, M: Dict, w_star, caps, z_star, meta, ladders):
     base_cost = cost_row(i, q_row, M)
     q_row, cost_new, u_new, feasible = apply_budget_policy(i, M, q_row, base_cost)
     return q_row, p_row, cost_new, u_new, feasible
-    #return q_row, p_row, cost_new, u_new, True
 
-def joint_best_response_plan(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
+def compute_vi_and_wi(i: int, M: Dict, z_max: float) -> Tuple[float, float]:
+    """Compute the ε-step quantity v_i and corresponding bid price w_i.
+
+    From Lazar & Semret: the buyer steps back from the feasibility boundary
+    z_max by ε / θ'_i(0), then bids at the marginal value of that quantity.
+    """
+    eps = float(M["epsilon"])
+    theta0_prime = theta_i_prime(i, 0.0, M)
+    if theta0_prime <= 0.0:
+        return 0.0, 0.0
+    dz = eps / theta0_prime
+    v_i = max(0.0, z_max - dz)
+    w_i = theta_i_prime(i, v_i, M)
+    return v_i, w_i
+
+
+def multi_auction_eps_best_reply(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
+    """ε-best-reply for buyer i across multiple auctions (Lazar & Semret).
+
+    Steps:
+      1. Build opponent ladders and find the feasibility boundary z_max.
+      2. Apply the ε-step: v_i = z_max − ε/θ'_i(0),  w_i = θ'_i(v_i).
+      3. Split v_i across sellers at price w_i using the min-cost rule.
+    """
     ladders = build_ladders(i, M)
-    w_star, caps, z_star, meta = sup_G_i_multi(
-        i, M, ladders)
-    q_row, p_row, cost, u_new, feasible = compute_t_i_multi(
-        i, M, w_star, caps, z_star, meta, ladders)
+
+    # 1) feasibility boundary
+    w_star, caps, z_max, meta = sup_G_i_multi(i, M, ladders)
+    if z_max <= M["tol"]:
+        q_zero = np.zeros(M["J"], float)
+        return q_zero, np.zeros(M["J"], float), True, u_i_current(i, M)
+
+    # 2) ε-step
+    v_i, w_i = compute_vi_and_wi(i, M, z_max)
+    if v_i <= M["tol"]:
+        q_zero = np.zeros(M["J"], float)
+        return q_zero, np.zeros(M["J"], float), True, u_i_current(i, M)
+
+    # 3) caps and min-cost split at w_i
+    caps = avail_at_bprice(i, w_i, M, ladders)
+    z_star = min(v_i, float(caps.sum()), float(M["qbar"][i]))
+    q_row = _min_cost_split(i, M, z_star, caps, ladders, y_ref=w_i)
+    p_row = np.full(M["J"], w_i, float)
+
+    base_cost = cost_row(i, q_row, M)
+    q_row, cost_new, u_new, feasible = apply_budget_policy(i, M, q_row, base_cost)
     return q_row, p_row, feasible, u_new
 
 
+def exact_best_response(i: int, M: Dict) -> Tuple[np.ndarray, np.ndarray, bool, float]:
+    """Exact utility-maximizing best response for buyer i across multiple auctions.
+
+    Finds the price w* that maximizes u_i by solving for the interior or boundary
+    optimum of G_i over the full staircase of opponent prices. Unlike
+    multi_auction_eps_best_reply, no ε-step is applied — this returns the exact
+    argmax. Useful for analysis and comparison against the ε-reply dynamics.
+    Not guaranteed to conver
+    """
+    ladders = build_ladders(i, M)
+    w_star, caps, z_star, meta = sup_G_i_multi(i, M, ladders)
+    q_row, p_row, cost, u_new, feasible = compute_t_i_multi(i, M, w_star, caps, z_star, meta, ladders)
+    return q_row, p_row, feasible, u_new

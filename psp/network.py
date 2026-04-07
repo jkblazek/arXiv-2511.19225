@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, List, Optional
 
-from market import u_i_current, joint_best_response_plan
+from psp.market import u_i_current, multi_auction_eps_best_reply
 
 # ------------------------------
 # Event types
@@ -15,7 +15,6 @@ POST_BID = 2
 # ------------------------------
 # Priority queue helpers
 # ------------------------------
-
 def push(M: Dict, t: float, etype: int, payload: Tuple):
     M["seq"] += 1
     heapq.heappush(M["pq"], (float(t), int(M["seq"]), int(etype), payload))
@@ -24,8 +23,14 @@ def pop(M: Dict):
     return heapq.heappop(M["pq"]) if M["pq"] else None
 
 def schedule_all_buyers(M: Dict, t0: float = 0.0):
-    det = M["deterministic_sched"]
-    perm = M["perm"]
+    if "deterministic_sched" in M and M["deterministic_sched"]:
+        det = True
+    else:
+        det = False 
+    if "perm" in M and M["perm"]:
+        perm = True
+    else:
+        perm = False
     rng = M["rng"]
     for i in range(M["I"]):
         if det:
@@ -45,6 +50,7 @@ def schedule_all_buyers_stable(M: dict, seed_order: int, t0: float = 0.0):
     for k, i in enumerate(M["perm"]):
         push(M, t0 + float(k), BUYER_COMPUTE, (int(i),))
 
+
 # ------------------------------
 # Events
 # ------------------------------
@@ -52,7 +58,7 @@ def schedule_all_buyers_stable(M: dict, seed_order: int, t0: float = 0.0):
 def handle_buyer_compute(M: Dict, i: int, verbose: bool = False, debug: bool = False):
     t0 = M["t"]
     u0 = u_i_current(i, M)
-    q_row, p_row, feasible, u1 = joint_best_response_plan(i, M)
+    q_row, p_row, feasible, u1 = multi_auction_eps_best_reply(i, M)
     if "deterministic_sched" in M and M["deterministic_sched"]:
         push(M, t0 + 1.0, BUYER_COMPUTE, (i,))
     elif "perm_pos" in M:

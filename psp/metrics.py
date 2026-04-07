@@ -4,8 +4,8 @@ from typing import Dict, Tuple, List, Optional
 import pandas as pd
 import numpy as np
 
-from market import a_row, theta_i, theta_i_prime, cost_row, integral_P_i_j
-from helpers import pstar_j
+from psp.market import a_row, theta_i, theta_i_prime, cost_row, integral_P_i_j, build_ladders, sup_G_i_multi
+from psp.helpers import pstar_j
 
 
 @dataclass
@@ -133,11 +133,10 @@ def market_report_from(metrics: MarketMetrics) -> pd.DataFrame:
 
 
 def record_market_snapshot_from(M: Dict, metrics: MarketMetrics,
-                                interval: float,
-                                market_history: pd.DataFrame) -> pd.DataFrame:
+                                interval: float) -> pd.DataFrame:
     I, J = metrics.a_mat.shape
     rows = []
-    for i in buyers_iter(M, include_reserve=False):
+    for i in range(M["I"]):
         z_i    = float(metrics.buyer_alloc[i])
         v_i    = float(metrics.buyer_value[i])
         c_i    = float(metrics.buyer_cost[i])
@@ -158,10 +157,8 @@ def record_market_snapshot_from(M: Dict, metrics: MarketMetrics,
                 "c_i":      c_i,
                 "diff":     0,
             })
-    if rows:
-        snap = pd.DataFrame(rows)
-        return pd.concat([market_history, snap], ignore_index=True)
-    return market_history
+    snap = pd.DataFrame(rows)
+    return snap
 
 def print_round_from_metrics(metrics: MarketMetrics,
                             round_decimals: int = 3,
@@ -312,3 +309,31 @@ def per_seller_outbid_losers(M: dict, tol: float = 1e-12) -> np.ndarray:
     return counts
 
 
+
+
+def summarize_transition_from_arrays(P, T, metrics_list=None):
+    """Summarize equilibrium transition across connectivity levels.
+
+    Parameters
+    ----------
+    P : array-like
+        Percent-shared-buyer levels (length L).
+    T : ndarray, shape (L, J)
+        Per-seller clearing prices p*_j at each level.
+    metrics_list : list of MarketMetrics, optional
+        One snapshot per level. When provided, computes average z* and θ'(z*)
+        across buyers; otherwise falls back to p* as a proxy.
+
+    Returns
+    -------
+    p_star_avg, theta_prime_avg, z_star_avg
+    """
+    P = np.asarray(P)
+    T = np.asarray(T)
+    p_star_avg = T.mean(axis=1)
+    theta_prime_avg = p_star_avg.copy()
+    z_star_avg = None
+    if metrics_list is not None:
+        z_star_avg = np.array([m.buyer_alloc.mean() for m in metrics_list])
+        theta_prime_avg = np.array([m.buyer_marg.mean() for m in metrics_list])
+    return p_star_avg, theta_prime_avg, z_star_avg

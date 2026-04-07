@@ -4,86 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-from market import theta_i_prime, theta_i, a_row, u_i_current, integral_P_i_j, joint_best_response_plan
-from helpers import eval_u_i_two_sellers, pstar_j
-from market import a_row, cost_row, u_i_current
-from metrics import compute_market_metrics, MarketMetrics
-
-def plot_buyer_diagnostics_broken(M: Dict,
-                           i: int,
-                           *,
-                           num_points: int = 200):
-    # --- Current state for buyer i ---
-    J = M["J"]
-    metrics = compute_market_metrics(M)
-
-    p_bids = metrics.bid_p[i,:]
-    p_star = metrics.p_star_j
-    v_cur = metrics.buyer_value[i]
-    u_cur = metrics.buyer_util[i]
-    w_cur = metrics.buyer_marg[i]
-    z_cur = metrics.buyer_alloc[i]
-    cost_cur = metrics.buyer_cost[i]
-
-
-    # --- Curves θ_i(z) and θ'_i(z) ---
-    zmax = max(M["qbar"][i], M["tol"])
-    Z = np.linspace(0.0, zmax, num_points)
-    fig, (axV, axM) = plt.subplots(1, 2, figsize=(10, 4))
-
-    # --- Valuation plot ---
-    Theta = np.array([theta_i(i, z, M) for z in Z])
-    axV.plot(Z, Theta, label=r"$\theta_i(z)$")
-
-    axV.axvline(z_cur, linestyle="--", linewidth=0.8)
-    axV.scatter([z_cur], [v_cur], zorder=5, label="(z, θ(z))")
-    
-    
-    axV.set_xlabel("Total quantity z")
-    axV.set_ylabel(r"$\theta_i(z)$")
-    axV.set_title(f"Buyer {i}: valuation")
-    axV.legend(loc="best")
-    axV.set_xlim(0.0, zmax * 1.1 if zmax > 0 else 1.0)
-
-    # --- Marginal vs prices ---
-    MTheta = np.array([theta_i_prime(i, z, M) for z in Z])
-    axM.plot(Z, MTheta, label=r"$\theta'_i(z)$")
-    axM.axvline(z_cur, linestyle="--", linewidth=0.8)
-    axM.scatter([z_cur], [w_cur], zorder=5, label="(z, θ'(z))")
-
-    axM.plot([], [], linestyle="-", linewidth=0.8, alpha=0.5, label="p*(seller)")
-    axM.axhline(p_star[0], linestyle="-", linewidth=0.8, alpha=0.5)
-
-    axM.set_xlabel("Total quantity z")
-    axM.set_ylabel("Marginal Value / Price")
-    axM.set_title(f"Buyer {i}: marginal vs. bids and p*")
-    axM.legend(loc="best")
-
-    y_top = max(MTheta.max() if MTheta.size else 1.0,
-                np.max(p_bids) if J else 0.0,
-                np.max(p_star)) * 1.1
-    axM.set_xlim(0.0, zmax * 1.1 if zmax > 0 else 1.0)
-    axM.set_ylim(0.0, y_top if y_top > 0 else 1.0)
-    lines = [
-        f"z={z_cur:.3f}\n",
-        f"θ'(z)={w_cur:.3f}\n",
-        f"value={v_cur:.3f}, \ncost={cost_cur:.3f}, \nutil={u_cur:.3f}\n",
-    ]
-    lines.append(f"best-response z={z_cur:.3f}, w={w_cur:.3f}")
-
-    axM.text(0.98, 0.02,"".join(lines),
-            ha="right",
-            va="bottom",
-            transform=axM.transAxes,
-            fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.3", alpha=0.1),
-    )
-
-    fig.suptitle(f"Buyer {i}: Valuation and Marginal Prices", y=0.95)
-    fig.tight_layout()
-    plt.show()
-
-    plot_shared_buyer_surface_z0z1(M, 0)
+from psp.market import theta_i_prime, theta_i, a_row, u_i_current, integral_P_i_j, exact_best_response, cost_row, multi_auction_eps_best_reply
+from psp.helpers import eval_u_i_two_sellers, pstar_j
+from psp.metrics import compute_market_metrics, MarketMetrics
 
 def plot_buyer_diagnostics(M: Dict, i: int, *, show_jbr: bool = True, num_points: int = 200):
     # snapshot
@@ -104,7 +27,7 @@ def plot_buyer_diagnostics(M: Dict, i: int, *, show_jbr: bool = True, num_points
 
     Z_hat, w_hat = None, None
     if show_jbr:
-        q_hat, p_hat, feasible, _ = joint_best_response_plan(i, M)
+        q_hat, p_hat, feasible, _ = exact_best_response(i, M)
         if feasible:
             Z_hat = float(np.sum(q_hat))
             w_hat = float(p_hat[0]) if len(p_hat) else None
@@ -441,3 +364,71 @@ def plot_equilibrium_transition(P, p_star_avg, theta_prime_avg, z_star_avg=None,
     plt.tight_layout()
     plt.show()
 
+
+
+def plot_ladder_tuple(M: Dict, ell: int, k: int, j: int, i: int,
+                      num_points: int = 300):
+    """Visualize the price ladder for a single Lemma 5.2 tuple (ℓ, k, j, i).
+
+    Shows the marginal valuation curves θ'_i(z) and θ'_k(z) together with
+    the four ladder prices as horizontal lines:
+
+        p*_ℓ  ≤  p_k  <  p*_j  ≤  p_i
+
+    The three margins are annotated as vertical arrows on the right edge.
+    """
+    from psp.helpers import pstar_j
+
+    p_ell_star = pstar_j(M, ell)
+    p_j_star   = pstar_j(M, j)
+    p_k        = float(M["bid_p"][k, ell])
+    p_i        = float(M["bid_p"][i, j])
+
+    zmax_i = float(M["qbar"][i])
+    zmax_k = float(M["qbar"][k])
+    zmax   = max(zmax_i, zmax_k)
+
+    Zs_i = np.linspace(0.0, zmax_i, num_points)
+    Zs_k = np.linspace(0.0, zmax_k, num_points)
+    mv_i = np.array([theta_i_prime(i, float(z), M) for z in Zs_i])
+    mv_k = np.array([theta_i_prime(k, float(z), M) for z in Zs_k])
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+
+    ax.plot(Zs_i, mv_i, label=f"θ′_i  (buyer {i}, bridges j={j} & ℓ={ell})")
+    ax.plot(Zs_k, mv_k, label=f"θ′_k  (buyer {k}, local to ℓ={ell})", linestyle="--")
+
+    prices = {
+        f"p*_ℓ={p_ell_star:.3g}": (p_ell_star, "C2", "-"),
+        f"p_k={p_k:.3g}":         (p_k,        "C3", "-."),
+        f"p*_j={p_j_star:.3g}":   (p_j_star,   "C4", "-"),
+        f"p_i={p_i:.3g}":         (p_i,        "C5", "-."),
+    }
+    for label, (val, color, ls) in prices.items():
+        ax.axhline(val, color=color, linestyle=ls, linewidth=1.2, alpha=0.85, label=label)
+
+    # Annotate the three margins as arrows on the right edge
+    x_ann = zmax * 1.02
+    margins = [
+        (p_ell_star, p_k,       "C3", f"p_k−p*_ℓ\n={p_k-p_ell_star:.3g}"),
+        (p_k,        p_j_star,  "C4", f"p*_j−p_k\n={p_j_star-p_k:.3g}  ★"),
+        (p_j_star,   p_i,       "C5", f"p_i−p*_j\n={p_i-p_j_star:.3g}"),
+    ]
+    for y0, y1, color, label in margins:
+        if abs(y1 - y0) > 1e-9:
+            ax.annotate("", xy=(x_ann, y1), xytext=(x_ann, y0),
+                        arrowprops=dict(arrowstyle="<->", color=color, lw=1.4))
+            ax.text(x_ann * 1.01, (y0 + y1) / 2, label,
+                    va="center", ha="left", fontsize=7.5, color=color)
+
+    ax.set_xlabel("Total quantity z")
+    ax.set_ylabel("Marginal value θ′(z)")
+    ax.set_title(f"Lemma 5.2 — tuple (ℓ={ell}, k={k}, j={j}, i={i})\n"
+                 f"p*_ℓ ≤ p_k < p*_j ≤ p_i   (★ = strict inequality)")
+    ax.set_xlim(0.0, zmax * 1.15)
+    y_top = max(mv_i.max(), mv_k.max(), p_i) * 1.1
+    ax.set_ylim(0.0, y_top)
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, linestyle=":", alpha=0.4)
+    fig.tight_layout()
+    plt.show()

@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-from market import theta_i_prime, theta_i, a_row
+from psp.market import theta_i_prime, theta_i, a_row
 
 # ------------------------------
 # Seller-side helpers
@@ -92,4 +92,9 @@ def active_sellers_for_i(M: Dict, i: int):
     if "adj" in M:
         mask &= M["adj"][i, :].astype(bool)
     return np.nonzero(mask)[0]
+
+
+
+
+
 
