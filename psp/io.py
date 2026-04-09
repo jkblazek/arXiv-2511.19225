@@ -5,7 +5,7 @@ Trajectory format (traj_NNN.dat)
 ---------------------------------
 One row per recorded step. Columns:
 
-  t  a{i}_{j}...  v{i} c{i} u{i}  ...
+  t  a{i}_{j}...  v{i} c{i} u{i}  ...  plo_{j} phi_{j} ...
 
 where for each buyer i:
   a{i}_{j}  allocation from seller j
@@ -13,16 +13,25 @@ where for each buyer i:
   c{i}      total PSP cost
   u{i}      utility  v{i} - c{i}
 
+and for each seller j (appended after all buyer blocks):
+  plo_{j}   lowest winning bid  p_j(t)  — lower bound of margin interval
+  phi_{j}   highest losing bid  p̄_j(t) — upper bound of margin interval
+
+The margin interval is (phi_j, plo_j); its width plo_j - phi_j measures
+market tightness at seller j.
+
 Prices / summary format (prices.dat)
 --------------------------------------
 One row per connectivity level (or experiment condition). Columns:
 
-  e  pavg_{j} pstd_{j} ...  vtot ctot utot az
+  e  pavg_{j} pstd_{j} plo_{j} phi_{j} ...  vtot ctot utot az
 
 where:
   e           connectivity level (fraction, 0–1)
   pavg_{j}    allocation-weighted mean bid price at seller j
   pstd_{j}    allocation-weighted std of bid price at seller j
+  plo_{j}     lowest winning bid (clearing price)
+  phi_{j}     highest losing bid
   vtot        total market valuation (sum over buyers)
   ctot        total market cost
   utot        total market utility
@@ -52,13 +61,15 @@ def _traj_header(I: int, J: int) -> str:
         for j in range(J):
             cols.append(f"a{i}_{j}")
         cols += [f"v{i}", f"c{i}", f"u{i}"]
+    for j in range(J):
+        cols += [f"plo_{j}", f"phi_{j}"]
     return "#" + "  ".join(cols)
 
 
 def _prices_header(J: int) -> str:
     cols = ["e"]
     for j in range(J):
-        cols += [f"pavg_{j}", f"pstd_{j}"]
+        cols += [f"pavg_{j}", f"pstd_{j}", f"plo_{j}", f"phi_{j}"]
     cols += ["vtot", "ctot", "utot", "az"]
     return "#" + "  ".join(cols)
 
@@ -86,6 +97,8 @@ def append_traj_row(path: str, t: float, metrics) -> None:
             f"{metrics.buyer_cost[i]:.6g}",
             f"{metrics.buyer_util[i]:.6g}",
         ]
+    for j in range(J):
+        row += [f"{metrics.plo_j[j]:.6g}", f"{metrics.phi_j[j]:.6g}"]
     with open(path, "a") as f:
         f.write("  ".join(row) + "\n")
 
@@ -113,7 +126,7 @@ def write_prices(path: str, rows: list[dict]) -> None:
         for row in rows:
             cols = ["e"]
             for j in range(J):
-                cols += [f"pavg_{j}", f"pstd_{j}"]
+                cols += [f"pavg_{j}", f"pstd_{j}", f"plo_{j}", f"phi_{j}"]
             cols += ["vtot", "ctot", "utot", "az"]
             vals = [f"{row[c]:.6g}" for c in cols]
             f.write("  ".join(vals) + "\n")
@@ -173,6 +186,8 @@ def prices_row_from(e: float, metrics) -> dict:
             pavg = pstd = 0.0
         row[f"pavg_{j}"] = pavg
         row[f"pstd_{j}"] = pstd
+        row[f"plo_{j}"]  = float(metrics.plo_j[j])
+        row[f"phi_{j}"]  = float(metrics.phi_j[j])
     row["vtot"] = float(metrics.buyer_value.sum())
     row["ctot"] = float(metrics.buyer_cost.sum())
     row["utot"] = float(metrics.buyer_util.sum())
