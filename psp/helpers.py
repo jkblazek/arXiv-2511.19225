@@ -30,21 +30,50 @@ def seller_shell_1hop(M: Dict, j: int):
     return shell
 
 def pstar_j(M: Dict, j: int) -> float:
-    I = M["I"]
-    Qj = M["Q_max"][j]
+    """p_j(t): lowest winning bid price at seller j (marginal clearing price).
+
+    This is the lower bound of the margin interval (p̄_j, p_j).
+    Returns 0.0 if seller j is undersubscribed.
+    """
+    Qj   = M["Q_max"][j]
     qcol = M["bid_q"][:, j]
     pcol = M["bid_p"][:, j]
-    idx = np.nonzero(qcol > 0.0 + M["tol"])[0]
+    idx  = np.nonzero(qcol > 0.0 + M["tol"])[0]
     if idx.size == 0:
         return 0.0
-    bids = [(i, qcol[i], pcol[i]) for i in idx]
-    bids.sort(key=lambda t: t[2], reverse=True)
+    bids = sorted([(float(qcol[i]), float(pcol[i])) for i in idx],
+                  key=lambda t: t[1], reverse=True)
     cum = 0.0
-    for (i, q, p) in bids:
+    for q, p in bids:
         if cum + q >= Qj - M["tol"]:
             return p
         cum += q
     return 0.0
+
+
+def pbar_j(M: Dict, j: int) -> float:
+    """p̄_j(t): highest losing bid price at seller j.
+
+    This is the upper bound of the margin interval (p̄_j, p_j).
+    Returns 0.0 if there are no losing bidders (all bids win or no bids).
+    """
+    Qj   = M["Q_max"][j]
+    qcol = M["bid_q"][:, j]
+    pcol = M["bid_p"][:, j]
+    idx  = np.nonzero(qcol > 0.0 + M["tol"])[0]
+    if idx.size == 0:
+        return 0.0
+    bids = sorted([(float(qcol[i]), float(pcol[i])) for i in idx],
+                  key=lambda t: t[1], reverse=True)
+    cum = 0.0
+    highest_loser = 0.0
+    for q, p in bids:
+        if cum >= Qj - M["tol"]:
+            # this bid and all below are losers
+            highest_loser = p
+            break
+        cum += q
+    return highest_loser
 
 def winners_on_j(M: Dict, j: int):
     """Buyers who fill up to Q_max[j] at current bids."""
