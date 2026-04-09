@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 from psp.market import a_row, theta_i, theta_i_prime, cost_row, integral_P_i_j, build_ladders, sup_G_i_multi
-from psp.helpers import pstar_j
+from psp.helpers import pstar_j, pbar_j
 
 
 @dataclass
@@ -27,7 +27,9 @@ class MarketMetrics:
     Q_max: np.ndarray           # (J,)
     E_j: np.ndarray             # (J,)
     V_j: np.ndarray             # (J,)
-    p_star_j: np.ndarray        # (J,)
+    p_star_j: np.ndarray        # (J,) lowest winning bid  p_j(t)
+    plo_j: np.ndarray           # (J,) lowest winning bid  p_j(t)  (alias)
+    phi_j: np.ndarray           # (J,) highest losing bid  p̄_j(t)
 
 
 def compute_market_metrics(M: Dict) -> MarketMetrics:
@@ -57,9 +59,11 @@ def compute_market_metrics(M: Dict) -> MarketMetrics:
 
     alloc_j   = a_mat.sum(axis=0)
     revenue_j = np.zeros(J, float)
-    E_j       = np.zeros(J, float)  # allocation-weighted average posted bid
-    V_j       = np.zeros(J, float)  # allocation-weighted variance of posted bids
+    E_j       = np.zeros(J, float)
+    V_j       = np.zeros(J, float)
     p_star_j  = np.zeros(J, float)
+    plo_j     = np.zeros(J, float)
+    phi_j     = np.zeros(J, float)
 
     for j in range(J):
         A = alloc_j[j]
@@ -80,14 +84,17 @@ def compute_market_metrics(M: Dict) -> MarketMetrics:
         V_j[j] = ((a_col * (p_col - Ej) ** 2).sum()) / A
 
         p_star_j[j] = pstar_j(M, j)
+        plo_j[j]    = pstar_j(M, j)
+        phi_j[j]    = pbar_j(M, j)
 
     Q_max = M["Q_max"]
 
     return MarketMetrics(
         a_mat=a_mat, buyer_alloc=buyer_alloc, buyer_value=buyer_value,
-        buyer_util=buyer_util, buyer_marg=buyer_marg, buyer_cost=buyer_cost, bid_p=bid_p,
-        bid_q=bid_q, adj=adj, alloc_j=alloc_j, revenue_j=revenue_j, Q_max=Q_max,
-        E_j=E_j, V_j=V_j, p_star_j=p_star_j,
+        buyer_util=buyer_util, buyer_marg=buyer_marg, buyer_cost=buyer_cost,
+        bid_p=bid_p, bid_q=bid_q, adj=adj, alloc_j=alloc_j, revenue_j=revenue_j,
+        Q_max=Q_max, E_j=E_j, V_j=V_j, p_star_j=p_star_j,
+        plo_j=plo_j, phi_j=phi_j,
     )
 
 def market_report_from(metrics: MarketMetrics) -> pd.DataFrame:
