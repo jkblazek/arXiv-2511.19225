@@ -45,23 +45,36 @@ def make_membership_adj(I: int, J: int,
         adj[i, idx] = True
     return adj
 
-def make_membership_adj_banded(I: int, J: int, xp: float) -> np.ndarray:
-    adj = np.zeros((I, J), dtype=bool)
-    # Block size (disjoint case xp=0)
+def make_membership_adj_banded(I: int, J: int, xp: int) -> np.ndarray:
+    """Build a banded bipartite adjacency matrix.
+
+    Buyers are ordered 0..I-1 and sellers have contiguous base territories
+    of size base = I/J. The parameter xp is the number of buyers in the
+    overlap zone between adjacent sellers.
+
+    At xp=0 the territories are disjoint blocks.
+    At xp=k, each boundary between sellers shares k buyers, producing
+    overlapping triangles:
+      - edge sellers:   base + xp  buyers
+      - interior sellers: base + 2*xp buyers
+    At xp >= base all buyers bid in all auctions (fully connected).
+
+    Example: I=400, J=4, xp=20
+      base = 100
+      seller 0: buyers   0..119   (|I|=120)
+      seller 1: buyers  80..219   (|I|=140)
+      seller 2: buyers 180..319   (|I|=140)
+      seller 3: buyers 280..399   (|I|=120)
+
+    The graph diameter (edge distance between seller 0 and seller J-1)
+    is 2*(J-1), independent of xp.
+    """
+    adj  = np.zeros((I, J), dtype=bool)
     base = I / J
-    # Maximum possible half-width of expansion
-    # So at xp=1 the blocks reach across the entire domain.
-    extend = I
     for j in range(J):
-        # Center of seller j's block
-        center = (j + 0.5) * base
-        # Half-width grows with xp (0 → base/2, 1 → full extension)
-        half_width = (base / 2) + xp * (extend / 2)
-        # Buyers whose index falls inside this window participate
-        left = int(np.floor(center - half_width))
-        right = int(np.ceil(center + half_width))
-        # Clip to buyer domain
-        left = max(left, 0)
+        left  = int(np.floor(j * base - xp))
+        right = int(np.ceil((j + 1) * base + xp))
+        left  = max(left, 0)
         right = min(right, I)
         adj[left:right, j] = True
     return adj
