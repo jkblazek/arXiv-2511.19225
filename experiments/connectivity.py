@@ -3,11 +3,12 @@ Section 6.3 — Connectivity Sweep (Figure 8)
 
 Writes:
   data/connectivity/run.conf        experiment configuration
-  data/connectivity/traj_NNN.dat    one trajectory per trial
-  data/connectivity/prices.dat      ensemble summary (analysis input)
+  data/connectivity/traj_NNN.dat    one raw trajectory per trial
 
 Run:
     python -m experiments.connectivity
+Then:
+    python -m analysis.connectivity   (computes prices.dat and Figure 8)
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -18,7 +19,7 @@ from psp.market import make_market_multi
 from psp.network import run, schedule_all_buyers_stable
 from psp.init import make_membership_adj_banded, reset_market_for_new_adj, record_seeds
 from psp.metrics import compute_market_metrics
-from psp.io import write_conf, write_traj_header, append_traj_row, write_prices, prices_row_from
+from psp.io import write_conf, write_traj_header, append_traj_row
 
 OUT = "data/connectivity"
 
@@ -52,14 +53,9 @@ def run_experiment():
     base_seed = CONF["base_seed"]
     trials    = CONF["trials"]
 
-    # prices.dat accumulates one row per (trial, level) then averaged
-    # We collect all rows and average at the end.
-    from collections import defaultdict
-    level_rows = defaultdict(list)   # percent -> list of prices_row dicts
-
     for trial in range(trials):
-        seed_base  = base_seed + 1000 * trial
-        traj_path  = f"{OUT}/traj_{trial:03d}.dat"
+        seed_base = base_seed + 1000 * trial
+        traj_path = f"{OUT}/traj_{trial:03d}.dat"
 
         M = make_market_multi(I, J, Q_max=Q, epsilon=CONF["epsilon"], reserve=R,
                               seed=seed_base, adj=np.ones((I, J), dtype=bool))
@@ -77,25 +73,9 @@ def run_experiment():
             run(M, steps=steps, verbose=False)
 
             metrics = compute_market_metrics(M)
-            # trajectory: use connectivity level as t
             append_traj_row(traj_path, t=pm, metrics=metrics)
-            level_rows[pm].append(prices_row_from(pm, metrics))
 
         print(f"Trial {trial} done → {traj_path}")
-
-    # --- prices.dat: average over trials ---
-    import numpy as np
-    summary_rows = []
-    for pm in percents:
-        rows = level_rows[pm]
-        keys = [k for k in rows[0] if k != "e"]
-        avg  = {"e": pm}
-        for k in keys:
-            avg[k] = float(np.mean([r[k] for r in rows]))
-        summary_rows.append(avg)
-
-    write_prices(f"{OUT}/prices.dat", summary_rows)
-    print(f"Summary written to {OUT}/prices.dat")
 
 
 if __name__ == "__main__":
