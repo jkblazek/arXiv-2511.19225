@@ -1,0 +1,14 @@
+#!/bin/bash
+ver=${PWD##*-}
+case $# in
+0)
+	ser=unknown ;;
+*)
+	ser=`cat "$@" | md5sum | sed "s/ .*//"` ;;
+esac
+cat <<END >version.go
+package main
+
+const Version="$ver"
+const Serial="$ser"
+END
